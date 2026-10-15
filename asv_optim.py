@@ -1,10 +1,16 @@
 """
 АСВ-ОПТИМ: риск-ориентированная прогнозно-аналитическая модель
 выбора стратегии работы с активами ликвидируемых кредитных организаций.
+
+Версия 2.0: поддержка загрузки активов из Excel-файла.
 """
 
 import pandas as pd
 
+
+# ============================================================
+# РАСЧЁТНЫЕ ФУНКЦИИ
+# ============================================================
 
 def calculate_er(strategy):
     """
@@ -50,46 +56,84 @@ def compare_strategies(strategies, r=0.15):
     return df, best
 
 
-# === ДЕМОНСТРАЦИОННЫЙ РАСЧЁТ ===
-# Кейс: РосинтерБанк, право требования к ООО «Афганец»
-# Номинал: 917 185 851 руб. — ФАКТ (судебный акт)
-# Факт реализации: 52 000 000 руб. — ФАКТ (судебный акт)
+# ============================================================
+# ЗАГРУЗКА АКТИВОВ ИЗ EXCEL
+# ============================================================
 
-asset = {
-    'name': 'РосинтерБанк / Афганец',
-    'nominal': 917_185_851
-}
+def load_assets_from_excel(file_path):
+    """
+    Загружает данные по активам из Excel-файла.
+    
+    Ожидаемая структура файла (лист «Активы»):
+    | Актив | Стратегия | Расходы | Вероятность | Денежный поток | Срок (лет) |
+    """
+    df = pd.read_excel(file_path, sheet_name='Активы')
+    assets = {}
+    
+    for _, row in df.iterrows():
+        asset_name = row['Актив']
+        if asset_name not in assets:
+            assets[asset_name] = {
+                'nominal': row.get('Номинал', 0),
+                'strategies': {}
+            }
+        
+        probability = row['Вероятность']
+        cash_flow = row['Денежный поток']
+        term = int(row['Срок (лет)'])
+        
+        assets[asset_name]['strategies'][row['Стратегия']] = {
+            'costs': row['Расходы'],
+            'scenarios': [(probability, cash_flow), (1 - probability, 0)],
+            'cash_flows': [0] * (term - 1) + [cash_flow]
+        }
+    
+    return assets
 
-strategies = {
-    'Реализация на торгах': {
-        'costs': 137_577_878,
-        'scenarios': [(0.3, 917_185_851), (0.7, 0)],
-        'cash_flows': [0, 275_155_755]
-    },
-    'Публичное предложение': {
-        'costs': 91_718_585,
-        'scenarios': [(0.7, 52_000_000), (0.3, 0)],
-        'cash_flows': [0, 52_000_000]
-    },
-    'Продолжение взыскания': {
-        'costs': 183_437_170,
-        'scenarios': [(0.4, 917_185_851), (0.6, 0)],
-        'cash_flows': [0, 0, 366_874_340]
-    },
-    'Передача в отступное': {
-        'costs': 45_859_293,
-        'scenarios': [(0.5, 458_592_926), (0.5, 0)],
-        'cash_flows': [0, 458_592_926]
-    }
-}
 
-results, best = compare_strategies(strategies)
+# ============================================================
+# ОСНОВНАЯ ЛОГИКА
+# ============================================================
 
-# === ВЫВОД РЕЗУЛЬТАТОВ ===
-print(f"Актив: {asset['name']}")
-print(f"Номинал: {asset['nominal']:,} руб.\n")
-print(results.to_string(index=False))
-print(f"\nЛучшая стратегия по ENPV: {best}")
+def process_assets(assets, r=0.15):
+    """
+    Обрабатывает все активы и формирует итоговый отчёт.
+    """
+    all_results = []
+    
+    for asset_name, asset_data in assets.items():
+        strategies = asset_data['strategies']
+        df, best = compare_strategies(strategies, r)
+        
+        for _, row in df.iterrows():
+            all_results.append({
+                'Актив': asset_name,
+                'Стратегия': row['Стратегия'],
+                'ER, руб.': row['ER, руб.'],
+                'ENPV, руб.': row['ENPV, руб.'],
+                'Рекомендация': '← ЛУЧШАЯ' if row['Стратегия'] == best else ''
+            })
+    
+    return pd.DataFrame(all_results)
 
-# Экспорт в Excel
-results.to_excel('asv_optim_results.xlsx', index=False)
+
+# ============================================================
+# ЗАПУСК
+# ============================================================
+
+if __name__ == '__main__':
+    # Загрузка активов из Excel
+    assets = load_assets_from_excel('input.xlsx')
+    
+    # Обработка всех активов
+    results = process_assets(assets)
+    
+    # Вывод результатов
+    print("=" * 70)
+    print("АСВ-ОПТИМ: РЕЗУЛЬТАТЫ РАСЧЁТА")
+    print("=" * 70)
+    print(results.to_string(index=False))
+    
+    # Экспорт в Excel
+    results.to_excel('asv_optim_results.xlsx', index=False)
+    print("\nРезультаты сохранены в файл: asv_optim_results.xlsx")
